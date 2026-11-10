@@ -14,6 +14,44 @@ use core::{
     slice,
 };
 
+/// Whether `value` is a typed array whose viewed buffer is detached or out of
+/// bounds.
+///
+/// `%TypedArray%.prototype.byteOffset` and `byteLength` return `+0` for such a
+/// view (`IsTypedArrayOutOfBounds`), so no JavaScript-level read can tell it
+/// from a genuine empty view. Structured clone must throw a `DataCloneError`
+/// for it, and QuickJS reports the state by throwing from
+/// `JS_GetTypedArrayBuffer`. The probe consumes that exception, so the context
+/// is left clean; a value that is not a typed array is not out of bounds.
+pub fn is_out_of_bounds_view(value: &Value<'_>) -> bool {
+    let ctx = &value.ctx;
+    let raw = value.as_js_value();
+    // SAFETY: the value belongs to this context. A value that is not a typed
+    // array is reported as -1 without touching an internal slot.
+    if unsafe { qjs::JS_GetTypedArrayType(raw) } < 0 {
+        return false;
+    }
+    // SAFETY: the value is a typed array, so QuickJS reads only its
+    // typed-array slots. The call returns a new buffer reference to free, or
+    // leaves a `TypeErrorArrayBufferOOB` exception pending.
+    let buffer = unsafe {
+        qjs::JS_GetTypedArrayBuffer(ctx.as_ptr(), raw, null_mut(), null_mut(), null_mut())
+    };
+    match unsafe { ctx.handle_exception(buffer) } {
+        Ok(buffer) => {
+            // SAFETY: `handle_exception` returned the new reference untouched.
+            unsafe { qjs::JS_FreeValue(ctx.as_ptr(), buffer) };
+            false
+        }
+        Err(_) => {
+            // SAFETY: the failed call left one exception value pending; taking
+            // it clears the context for the caller.
+            unsafe { qjs::JS_FreeValue(ctx.as_ptr(), qjs::JS_GetException(ctx.as_ptr())) };
+            true
+        }
+    }
+}
+
 /// The trait which implements types which capable to be TypedArray items
 ///
 pub trait TypedArrayItem: Copy {
@@ -430,6 +468,60 @@ impl<'js> Object<'js> {
 #[cfg(test)]
 mod test {
     use crate::*;
+
+    /// A view that a shrunken resizable buffer leaves out of bounds reports 0
+    /// from both byte getters, so the probe is the only way to see it; the
+    /// probe must also clear the exception it raised, or the next evaluation
+    /// would inherit it.
+    #[test]
+    fn an_out_of_bounds_view_is_reported_and_the_probe_clears_its_exception() {
+        test_with(|ctx| {
+            let out_of_bounds: Object = ctx
+                .eval(
+                    r#"
+                        (() => {
+                            const buffer = new ArrayBuffer(16, {maxByteLength: 32});
+                            const view = new Uint8Array(buffer, 8);
+                            buffer.resize(0);
+                            return view;
+                        })()
+                    "#,
+                )
+                .unwrap();
+            let diagnostics: String = ctx
+                .eval(
+                    r#"
+                        (() => {
+                            const buffer = new ArrayBuffer(16, {maxByteLength: 32});
+                            const view = new Uint8Array(buffer, 8);
+                            buffer.resize(0);
+                            return [
+                                buffer.resizable,
+                                buffer.byteLength,
+                                view.byteOffset,
+                                view.byteLength,
+                                view.length,
+                                Object.prototype.toString.call(view),
+                            ].join(",");
+                        })()
+                    "#,
+                )
+                .unwrap();
+            let diagnostics = diagnostics.to_string().unwrap_or_default();
+            assert!(
+                is_out_of_bounds_view(out_of_bounds.as_value()),
+                "view state: {diagnostics}"
+            );
+            assert_eq!(ctx.eval::<i32, _>("1").unwrap(), 1);
+
+            let in_bounds: Object = ctx.eval("new Uint8Array(8)").unwrap();
+            assert!(!is_out_of_bounds_view(in_bounds.as_value()));
+            let empty: Object = ctx.eval("new Uint8Array(0)").unwrap();
+            assert!(!is_out_of_bounds_view(empty.as_value()));
+            let not_a_view: Object = ctx.eval("({})").unwrap();
+            assert!(!is_out_of_bounds_view(not_a_view.as_value()));
+        });
+    }
 
     #[test]
     fn from_javascript_i8() {

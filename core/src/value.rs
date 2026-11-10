@@ -33,7 +33,7 @@ pub mod typed_array;
 
 pub use array_buffer::{ArrayBuffer, ArrayBufferSource};
 pub use iterable::{Iterable, IterableFn, JsIterator};
-pub use typed_array::{TypedArray, U8Clamped};
+pub use typed_array::{is_out_of_bounds_view, TypedArray, U8Clamped};
 
 /// Any JavaScript value
 pub struct Value<'js> {

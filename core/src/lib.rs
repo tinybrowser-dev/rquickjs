@@ -58,7 +58,8 @@ pub use context::MultiWith;
 #[cfg_attr(feature = "doc-cfg", doc(cfg(feature = "futures")))]
 pub use runtime::AsyncRuntime;
 pub use value::{
-    ArrayBuffer, ArrayBufferSource, Iterable, IterableFn, JsIterator, TypedArray, U8Clamped,
+    is_out_of_bounds_view, ArrayBuffer, ArrayBufferSource, Iterable, IterableFn, JsIterator,
+    TypedArray, U8Clamped,
 };
 
 //#[doc(hidden)]
