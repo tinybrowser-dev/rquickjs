@@ -4,6 +4,7 @@ mod base;
 mod exotic;
 pub(crate) mod opaque;
 pub(crate) mod raw;
+pub(crate) mod shared_buffer;
 mod userdata;
 
 #[cfg(feature = "futures")]

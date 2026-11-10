@@ -59,7 +59,7 @@ pub use context::MultiWith;
 pub use runtime::AsyncRuntime;
 pub use value::{
     is_out_of_bounds_view, ArrayBuffer, ArrayBufferSource, Iterable, IterableFn, JsIterator,
-    TypedArray, U8Clamped,
+    SharedBufferLease, TypedArray, U8Clamped,
 };
 
 //#[doc(hidden)]

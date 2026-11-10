@@ -386,6 +386,140 @@ impl<'js> ArrayBuffer<'js> {
     }
 }
 
+/// A process-wide reference to one `SharedArrayBuffer`'s bytes.
+///
+/// A `SharedArrayBuffer`'s data block is shared, not copied
+/// (<https://tc39.es/ecma262/#sec-abstract-operations-for-sharedarraybuffer-objects>).
+/// QuickJS runtimes on two threads can view the same block when both were
+/// constructed with [`Runtime::install_shared_array_buffer_hooks`] and the
+/// second wraps the pointer with `JS_NewArrayBuffer(..., is_shared = true)`.
+/// The lease holds one reference to the block, so the sender can be collected
+/// while a queued message still names it.
+///
+/// [`Runtime::install_shared_array_buffer_hooks`]: crate::Runtime::install_shared_array_buffer_hooks
+pub struct SharedBufferLease {
+    ptr: *mut u8,
+    len: usize,
+}
+
+// SAFETY: the lease is only a pointer and a length into a block whose
+// reference count is atomic. It never dereferences on the Rust side; the
+// shared-memory contract is JavaScript's (`Atomics`), not Rust's.
+unsafe impl Send for SharedBufferLease {}
+// SAFETY: same as the `Send` impl.
+unsafe impl Sync for SharedBufferLease {}
+
+impl Clone for SharedBufferLease {
+    fn clone(&self) -> Self {
+        crate::runtime::shared_buffer::retain(self.ptr);
+        Self {
+            ptr: self.ptr,
+            len: self.len,
+        }
+    }
+}
+
+impl Drop for SharedBufferLease {
+    fn drop(&mut self) {
+        crate::runtime::shared_buffer::release(self.ptr);
+    }
+}
+
+impl SharedBufferLease {
+    /// Takes a reference to `value`'s bytes when it is a `SharedArrayBuffer`
+    /// this process allocated with the hooks installed.
+    ///
+    /// Returns `None` for any other value: calling this with a plain
+    /// `ArrayBuffer` must not touch the reference-count header, which a plain
+    /// buffer does not have.
+    pub fn new(ctx: &Ctx<'_>, value: &Value<'_>) -> Option<Self> {
+        let raw = value.as_js_value();
+        let class = crate::runtime::shared_buffer::shared_class_id(ctx.as_ptr());
+        // SAFETY: `JS_GetClassID` returns an invalid id for non-objects.
+        if class == u32::MAX || unsafe { qjs::JS_GetClassID(raw) } != class {
+            return None;
+        }
+        let mut size = 0;
+        // SAFETY: the value is a live SharedArrayBuffer in this context.
+        let ptr = unsafe { qjs::JS_GetArrayBuffer(ctx.as_ptr(), &mut size, raw) };
+        if ptr.is_null() {
+            return None;
+        }
+        crate::runtime::shared_buffer::retain(ptr);
+        // The block may be larger than the current byte length: a growable
+        // buffer commits its maximum upfront, so the header, not QuickJS's
+        // current-length answer, bounds what a receiver may wrap.
+        // SAFETY: `ptr` came from a `SharedArrayBuffer`, and every runtime
+        // installs the hooks before script runs, so the header exists.
+        let len = unsafe {
+            crate::runtime::shared_buffer::allocation_size(ptr as *mut c_void)
+        };
+        Some(Self { ptr, len })
+    }
+
+    /// The block's length in bytes.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// The block's address, stable for as long as the block is alive.
+    ///
+    /// A `SharedArrayBuffer`'s data never moves (a growable one commits its
+    /// maximum size upfront), so the address identifies the block: two views
+    /// of one buffer, or two messages naming it, share this value.
+    pub fn address(&self) -> usize {
+        self.ptr as usize
+    }
+
+    /// Whether the block is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Wraps the block in a `SharedArrayBuffer` owned by `ctx`'s runtime.
+    ///
+    /// The new object takes its own reference; the lease keeps its own, so the
+    /// block survives either side.
+    pub fn to_array_buffer<'js>(&self, ctx: &Ctx<'js>) -> Result<ArrayBuffer<'js>> {
+        self.to_array_buffer_with(ctx, self.len, None)
+    }
+
+    /// Wraps the block in a `SharedArrayBuffer` of `byte_length` bytes, with
+    /// `max_byte_length` when it is growable.
+    ///
+    /// Both lengths must not exceed [`Self::len`], the block's allocation. The
+    /// caller owns that check: this is the receiving side of a serialized
+    /// message, and the payload is untrusted
+    /// (<https://html.spec.whatwg.org/multipage/structured-data.html#structureddeserialize>).
+    /// `None` produces a fixed-length buffer, matching a sender whose buffer
+    /// was not growable.
+    pub fn to_array_buffer_with<'js>(
+        &self,
+        ctx: &Ctx<'js>,
+        byte_length: usize,
+        max_byte_length: Option<usize>,
+    ) -> Result<ArrayBuffer<'js>> {
+        let max = max_byte_length.map_or(FIXED_SIZE, |max| max as qjs::size_t);
+        // SAFETY: the pointer is a live hook allocation of `len` bytes, and
+        // `JS_NewArrayBuffer` takes a reference instead of taking ownership.
+        let value = unsafe {
+            qjs::JS_NewArrayBuffer(
+                ctx.as_ptr(),
+                self.ptr,
+                byte_length as qjs::size_t,
+                max,
+                None,
+                core::ptr::null_mut(),
+                true,
+            )
+        };
+        // SAFETY: the value is a new reference from `JS_NewArrayBuffer`.
+        let value = unsafe { ctx.handle_exception(value)? };
+        // SAFETY: `handle_exception` returned the new reference untouched.
+        ArrayBuffer::from_js(ctx, unsafe { Value::from_js_value(ctx.clone(), value) })
+    }
+}
+
 impl<'js> Deref for ArrayBuffer<'js> {
     type Target = Object<'js>;
 
