@@ -201,6 +201,16 @@ impl<'js> Object<'js> {
         }
     }
 
+    /// Mark this object with the `[[IsHTMLDDA]]` internal slot, which makes
+    /// `typeof` report `"undefined"`, `ToBoolean` false, and loose equality
+    /// treat it like `null`. The slot exists for `document.all` alone
+    /// (<https://html.spec.whatwg.org/multipage/common-dom-interfaces.html#htmlallcollection>).
+    pub fn set_is_html_dda(&self) {
+        // SAFETY: `ctx` and the object belong to the same live
+        // `JSContext`; the call only sets a bit on the object's cell.
+        unsafe { qjs::JS_SetIsHTMLDDA(self.0.ctx.as_ptr(), self.0.as_js_value()) }
+    }
+
     /// Check instance of object
     pub fn is_instance_of(&self, class: impl AsRef<Value<'js>>) -> bool {
         let class = class.as_ref();
