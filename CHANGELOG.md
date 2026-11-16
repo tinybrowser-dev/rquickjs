@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed nondeterministic module export and method accessor ordering in procedural macro output
 - Fixed building `rquickjs-sys` with plain clang on Windows MSVC targets (`CC=clang`): the C flags now follow the compiler rather than the target
 - Fixed `Ctx::eval` and other related methods returning a `String contained internal null bytes` error when JS source contains null bytes
 - Fixed `#[rquickjs::methods]` failing to compile a setter with no matching getter
@@ -30,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Atom::to_value` returns a symbol if the atom represents a symbol, instead of always returning a JS string
 - Fixed converting an invalid JS `Date` into `SystemTime` or `chrono::DateTime` returning the Unix epoch instead of an error
 - Fixed build failures on armhf and other platforms with no native 64-bit atomics.
+- Fixed `Value::new_number` turning `-0.0` into `+0.0`
 
 ### Security
 
