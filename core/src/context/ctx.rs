@@ -482,7 +482,7 @@ impl<'js> Ctx<'js> {
     pub fn stack_frame(&self, stack_level: isize) -> Option<StackFrame<'js>> {
         let stack_level = core::ffi::c_int::try_from(stack_level).ok()?;
         let mut location = qjs::JSStackFrameLocation {
-            filename: qjs::__JS_ATOM_NULL,
+            filename: qjs::JS_ATOM_NULL,
             line_num: -1,
             col_num: -1,
             native: 1,
@@ -567,7 +567,7 @@ pub struct StackFrame<'js> {
 /// Takes ownership of a frame's filename atom, treating `JS_ATOM_NULL` as no
 /// name.
 fn position_atom<'js>(ctx: &Ctx<'js>, atom: qjs::JSAtom) -> Option<Atom<'js>> {
-    if atom == qjs::__JS_ATOM_NULL {
+    if atom == qjs::JS_ATOM_NULL {
         return None;
     }
     // SAFETY: the atom was duplicated for the caller by the C side and is
