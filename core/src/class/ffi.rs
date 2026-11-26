@@ -1,11 +1,13 @@
 use super::{ExoticDefineResult, ExoticSetResult, JsClass, Tracer};
-use crate::{class::JsCell, function::Params, qjs, runtime::opaque::Opaque, Atom, Ctx, Value};
+use crate::{
+    class::JsCell, function::Params, qjs, runtime::opaque::RuntimeOpaque, Atom, Ctx, Value,
+};
 use alloc::boxed::Box;
 use core::{any::TypeId, mem, panic::AssertUnwindSafe, ptr::NonNull};
 
 /// FFI finalizer, destroying the object once it is delete by the Gc.
 pub(crate) unsafe extern "C" fn class_finalizer(rt: *mut qjs::JSRuntime, val: qjs::JSValue) {
-    let class_id = Opaque::from_runtime_ptr(rt).get_class_id();
+    let class_id = RuntimeOpaque::from_runtime_ptr(rt).get_class_id();
     let ptr = qjs::JS_GetOpaque(val, class_id);
     let ptr = NonNull::new(ptr).unwrap().cast::<ClassCell<()>>();
     (ptr.as_ref().v_table.finalizer)(ptr);
@@ -28,7 +30,7 @@ pub(crate) unsafe extern "C" fn class_trace(
     val: qjs::JSValue,
     mark_func: qjs::JS_MarkFunc,
 ) {
-    let class_id = Opaque::from_runtime_ptr(rt).get_class_id();
+    let class_id = RuntimeOpaque::from_runtime_ptr(rt).get_class_id();
     let ptr = qjs::JS_GetOpaque(val, class_id);
     let ptr = NonNull::new(ptr).unwrap().cast::<ClassCell<()>>();
     let tracer = Tracer::from_ffi(rt, mark_func);
@@ -50,7 +52,7 @@ pub(crate) unsafe extern "C" fn exotic_class_trace(
 
 /// FFI finalizer, destroying the object once it is delete by the Gc.
 pub(crate) unsafe extern "C" fn callable_finalizer(rt: *mut qjs::JSRuntime, val: qjs::JSValue) {
-    let class_id = Opaque::from_runtime_ptr(rt).get_callable_id();
+    let class_id = RuntimeOpaque::from_runtime_ptr(rt).get_callable_id();
     let ptr = qjs::JS_GetOpaque(val, class_id);
     let ptr = NonNull::new(ptr).unwrap().cast::<ClassCell<()>>();
     (ptr.as_ref().v_table.finalizer)(ptr)
@@ -62,7 +64,7 @@ pub(crate) unsafe extern "C" fn callable_trace(
     val: qjs::JSValue,
     mark_func: qjs::JS_MarkFunc,
 ) {
-    let class_id = Opaque::from_runtime_ptr(rt).get_callable_id();
+    let class_id = RuntimeOpaque::from_runtime_ptr(rt).get_callable_id();
     let ptr = qjs::JS_GetOpaque(val, class_id);
     let ptr = NonNull::new(ptr).unwrap().cast::<ClassCell<()>>();
     let tracer = Tracer::from_ffi(rt, mark_func);
@@ -79,7 +81,7 @@ pub(crate) unsafe extern "C" fn call(
     flags: qjs::c_int,
 ) -> qjs::JSValue {
     let rt = qjs::JS_GetRuntime(ctx);
-    let id = Opaque::from_runtime_ptr(rt).get_callable_id();
+    let id = RuntimeOpaque::from_runtime_ptr(rt).get_callable_id();
     let ptr = qjs::JS_GetOpaque(function, id);
     let ptr = NonNull::new(ptr).unwrap().cast::<ClassCell<()>>();
     (ptr.as_ref().v_table.call)(ptr, ctx, function, this, argc, argv, flags)

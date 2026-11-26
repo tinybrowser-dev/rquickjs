@@ -34,6 +34,7 @@ pub const JS_EVAL_FLAG_UNUSED: u32 = 16;
 pub const JS_EVAL_FLAG_COMPILE_ONLY: u32 = 32;
 pub const JS_EVAL_FLAG_BACKTRACE_BARRIER: u32 = 64;
 pub const JS_EVAL_FLAG_ASYNC: u32 = 128;
+pub const JS_RUNTIME_OPTIONS_VERSION: u32 = 1;
 pub const JS_DUMP_BYTECODE_FINAL: u32 = 1;
 pub const JS_DUMP_BYTECODE_PASS2: u32 = 2;
 pub const JS_DUMP_BYTECODE_PASS1: u32 = 4;
@@ -238,6 +239,37 @@ const _: () = {
     ["Offset of field: JSMallocFunctions::js_malloc_usable_size"]
         [::core::mem::offset_of!(JSMallocFunctions, js_malloc_usable_size) - 32usize];
 };
+pub type JSRandomBytesFunc = ::core::option::Option<
+    unsafe extern "C" fn(
+        opaque: *mut ::core::ffi::c_void,
+        buf: *mut u8,
+        len: size_t,
+    ) -> ::core::ffi::c_int,
+>;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct JSRuntimeOptions {
+    pub version: ::core::ffi::c_int,
+    pub malloc_functions: *const JSMallocFunctions,
+    pub malloc_opaque: *mut ::core::ffi::c_void,
+    pub random_bytes: JSRandomBytesFunc,
+    pub random_opaque: *mut ::core::ffi::c_void,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of JSRuntimeOptions"][::core::mem::size_of::<JSRuntimeOptions>() - 40usize];
+    ["Alignment of JSRuntimeOptions"][::core::mem::align_of::<JSRuntimeOptions>() - 8usize];
+    ["Offset of field: JSRuntimeOptions::version"]
+        [::core::mem::offset_of!(JSRuntimeOptions, version) - 0usize];
+    ["Offset of field: JSRuntimeOptions::malloc_functions"]
+        [::core::mem::offset_of!(JSRuntimeOptions, malloc_functions) - 8usize];
+    ["Offset of field: JSRuntimeOptions::malloc_opaque"]
+        [::core::mem::offset_of!(JSRuntimeOptions, malloc_opaque) - 16usize];
+    ["Offset of field: JSRuntimeOptions::random_bytes"]
+        [::core::mem::offset_of!(JSRuntimeOptions, random_bytes) - 24usize];
+    ["Offset of field: JSRuntimeOptions::random_opaque"]
+        [::core::mem::offset_of!(JSRuntimeOptions, random_opaque) - 32usize];
+};
 pub type JSRuntimeFinalizer =
     ::core::option::Option<unsafe extern "C" fn(rt: *mut JSRuntime, arg: *mut ::core::ffi::c_void)>;
 #[repr(C)]
@@ -277,6 +309,9 @@ unsafe extern "C" {
         mf: *const JSMallocFunctions,
         opaque: *mut ::core::ffi::c_void,
     ) -> *mut JSRuntime;
+}
+unsafe extern "C" {
+    pub fn JS_NewRuntime3(options: *const JSRuntimeOptions) -> *mut JSRuntime;
 }
 unsafe extern "C" {
     pub fn JS_FreeRuntime(rt: *mut JSRuntime);
@@ -1622,6 +1657,16 @@ pub type JSModuleLoaderFunc = ::core::option::Option<
         opaque: *mut ::core::ffi::c_void,
     ) -> *mut JSModuleDef,
 >;
+pub type JSDynamicImportFunc = ::core::option::Option<
+    unsafe extern "C" fn(
+        ctx: *mut JSContext,
+        basename: *const ::core::ffi::c_char,
+        filename: *const ::core::ffi::c_char,
+        token: JSValue,
+        attributes: JSValue,
+        opaque: *mut ::core::ffi::c_void,
+    ),
+>;
 pub type JSModuleLoaderFunc2 = ::core::option::Option<
     unsafe extern "C" fn(
         ctx: *mut JSContext,
@@ -1655,7 +1700,22 @@ unsafe extern "C" {
     );
 }
 unsafe extern "C" {
+    pub fn JS_SetDynamicImportFunc(
+        rt: *mut JSRuntime,
+        func: JSDynamicImportFunc,
+        opaque: *mut ::core::ffi::c_void,
+    );
+}
+unsafe extern "C" {
     pub fn JS_SetModuleNormalizeFunc2(rt: *mut JSRuntime, module_normalize: JSModuleNormalizeFunc2);
+}
+unsafe extern "C" {
+    pub fn JS_FinishDynamicImport(
+        ctx: *mut JSContext,
+        token: JSValue,
+        promise: JSValue,
+        exception: JSValue,
+    ) -> ::core::ffi::c_int;
 }
 unsafe extern "C" {
     pub fn JS_GetImportMeta(ctx: *mut JSContext, m: *mut JSModuleDef) -> JSValue;
@@ -1767,6 +1827,7 @@ unsafe extern "C" {
         ctx: *mut JSContext,
         basename: *const ::core::ffi::c_char,
         filename: *const ::core::ffi::c_char,
+        attributes: JSValue,
     ) -> JSValue;
 }
 pub const JSCFunctionEnum_JS_CFUNC_generic: JSCFunctionEnum = 0;

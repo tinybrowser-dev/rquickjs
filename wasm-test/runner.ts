@@ -134,8 +134,8 @@ check(
 );
 
 // ------------------------------------------------------------- memory limit
-// OOM is uncatchable (quickjs-ng #1810), so the try/catch cannot contain it:
-// the call fails with an engine error instead of a JS-caught value.
+// QuickJS makes OOM uncatchable from JS, so the host sees the error rather
+// than the script's catch handler. The engine must remain usable afterwards.
 const bomb = evalJs(
   "try { const arr = []; while (true) arr.push(new Array(65536).fill(1)); } catch (e) { 'contained: ' + e.message }",
 );

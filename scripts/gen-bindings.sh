@@ -29,6 +29,7 @@ copy_bindings x86_64-unknown-linux-gnu loongarch64-unknown-linux-musl
 copy_bindings riscv64gc-unknown-linux-gnu riscv64a23-unknown-linux-gnu
 # wasm32-wasip2 is generated natively (nightly); it is not a copy of a
 # 64-bit target.
+copy_bindings wasm32-wasip1 wasm32-wasip3
 copy_bindings wasm32-wasip1 wasm32-unknown-unknown
 copy_bindings x86_64-unknown-linux-gnu x86_64-unknown-linux-musl
 
