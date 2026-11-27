@@ -78,6 +78,10 @@ impl Default for EvalOptions {
     }
 }
 
+/// Compiled QuickJS script bytecode that can be evaluated in any [`Ctx`].
+#[derive(Clone, Debug)]
+pub struct CompiledScript(Box<[u8]>);
+
 /// Context in use, passed to [`Context::with`].
 #[derive(Debug)]
 pub struct Ctx<'js> {
@@ -200,6 +204,63 @@ impl<'js> Ctx<'js> {
             let val = self.eval_raw(source, file_name, options.to_flag())?;
             Value::from_js_value(self.clone(), val)
         })
+    }
+
+    /// Compile a script into QuickJS bytecode without executing it.
+    pub fn compile_script<S: Into<Vec<u8>>>(
+        &self,
+        source: S,
+        options: EvalOptions,
+    ) -> Result<CompiledScript> {
+        #[cfg(feature = "std")]
+        let file_name = {
+            if let Some(filename) = &options.filename {
+                &CString::new(filename.clone())?
+            } else {
+                c"eval_script"
+            }
+        };
+
+        #[cfg(not(feature = "std"))]
+        let file_name = c"eval_script";
+
+        let flag = options.to_flag() | qjs::JS_EVAL_FLAG_COMPILE_ONLY as i32;
+        let compiled = unsafe { self.eval_raw(source, file_name, flag)? };
+        let mut len = MaybeUninit::uninit();
+        let buf = unsafe {
+            let write_flags = (qjs::JS_WRITE_OBJ_BYTECODE | qjs::JS_WRITE_OBJ_STRIP_SOURCE) as i32;
+            let buf = qjs::JS_WriteObject(self.as_ptr(), len.as_mut_ptr(), compiled, write_flags);
+            qjs::JS_FreeValue(self.as_ptr(), compiled);
+            buf
+        };
+        if buf.is_null() {
+            return Err(self.raise_exception());
+        }
+        let bytes = unsafe {
+            let len = len.assume_init();
+            let bytes = core::slice::from_raw_parts(buf, len as usize).into();
+            qjs::js_free(self.as_ptr(), buf.cast());
+            bytes
+        };
+        Ok(CompiledScript(bytes))
+    }
+
+    /// Load and evaluate a script previously compiled with [`Ctx::compile_script`].
+    pub fn eval_compiled<V: FromJs<'js>>(&self, script: &CompiledScript) -> Result<V> {
+        let val = unsafe {
+            let obj = qjs::JS_ReadObject(
+                self.as_ptr(),
+                script.0.as_ptr(),
+                script.0.len() as _,
+                qjs::JS_READ_OBJ_BYTECODE as i32,
+            );
+            let obj = self.handle_exception(obj)?;
+            #[cfg(feature = "parallel")]
+            qjs::JS_UpdateStackTop(qjs::JS_GetRuntime(self.ctx.as_ptr()));
+            let val = qjs::JS_EvalFunction(self.as_ptr(), obj);
+            self.handle_exception(val)?
+        };
+        V::from_js(self, unsafe { Value::from_js_value(self.clone(), val) })
     }
 
     #[cfg(feature = "std")]
@@ -901,5 +962,31 @@ mod test {
             let res: String = ctx.eval("\"hi\0there\"").unwrap();
             assert_eq!(res, "hi\0there");
         })
+    }
+
+    #[test]
+    fn compile_script_and_eval_across_contexts_and_runtimes() {
+        use crate::{Context, EvalOptions, Function, Runtime};
+
+        let rt1 = Runtime::new().unwrap();
+        let ctx1 = Context::full(&rt1).unwrap();
+        let compiled = ctx1
+            .with(|ctx| ctx.compile_script("(function(x) { return x * 2 + 1; })", EvalOptions::default()))
+            .unwrap();
+
+        let ctx2 = Context::full(&rt1).unwrap();
+        ctx2.with(|ctx| {
+            let f: Function = ctx.eval_compiled(&compiled).unwrap();
+            let result: i32 = f.call((20,)).unwrap();
+            assert_eq!(result, 41);
+        });
+
+        let rt2 = Runtime::new().unwrap();
+        let ctx3 = Context::full(&rt2).unwrap();
+        ctx3.with(|ctx| {
+            let f: Function = ctx.eval_compiled(&compiled).unwrap();
+            let result: i32 = f.call((5,)).unwrap();
+            assert_eq!(result, 11);
+        });
     }
 }
